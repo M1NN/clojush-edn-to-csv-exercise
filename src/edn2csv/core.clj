@@ -26,7 +26,6 @@
 ; problems, so I'm sticking with this approach for now.
 (defn safe-println [output-stream & more]
   (.write output-stream (str (clojure.string/join "," more) "\n")))
-(defn uuid [] (str (java.util.UUID/randomUUID)))
 ; This prints out the relevant fields to the CSV filter
 ; and then returns 1 so we can count up how many individuals we processed.
 ; (The counting isn't strictly necessary, but it gives us something to
@@ -53,9 +52,12 @@
 
   (defn print-semantics-to-csv
   [csv-file line]
+  (def a (atom #{}))
   (let [semantics-uuid (uuid)
     values [semantics-uuid (get line :total-error) "Semantics"]]
-    (apply safe-println csv-file values))
+    (if-not (contains? @a semantics-uuid)
+      (apply safe-println csv-file values))
+    (swap! a conj semantics-uuid))
     1)
 
 ;(defn edn->csv-sequential [edn-file csv-file]
@@ -97,7 +99,7 @@
 
 (defn edn->csv-reducers [edn-file csv-file]
   (with-open [out-file (io/writer csv-file)]
-    (safe-println out-file parentOf_edges-header-line)
+    (safe-println out-file semantics-header-line)
     (->>
       (iota/seq edn-file)
       (r/map (partial edn/read-string {:default individual-reader}))
@@ -107,7 +109,7 @@
       ; to catch it. We could do that with `r/drop`, but that
       ; totally kills the parallelism. :-(
       (r/filter identity)
-      (r/map (partial print-parent-of-edges-to-csv out-file))
+      (r/map (partial print-semantics-to-csv out-file))
       (r/fold +)
       )))
 
@@ -131,16 +133,26 @@
           ;"_sequential")
         "_ParentOf_edges.csv"))
 
+(defn build-semantics-csv-filename
+  [edn-filename strategy]
+  (str (fs/parent edn-filename)
+        "/"
+        (fs/base-name edn-filename ".edn")
+        ;(if strategy
+          ;(str "_" strategy)
+          ;"_sequential")
+        "_Semantics.csv"))
+
 
 (defn -main
   [edn-filename & [strategy]]
-  (let [parentOf-csv-file (build-parentOf-csv-filename edn-filename strategy)]
+  (let [semantics-csv-file (build-semantics-csv-filename edn-filename strategy)]
     (time
       (condp = strategy
         ;"sequential" (edn->csv-sequential edn-filename individual-csv-file)
         ;"pmap" (edn->csv-pmap edn-filename individual-csv-file)
         ;"reducers" (edn->csv-reducers edn-filename individual-csv-file)
-        (edn->csv-reducers edn-filename parentOf-csv-file))))
+        (edn->csv-reducers edn-filename semantics-csv-file))))
   ; Necessary to get threads spun up by `pmap` to shutdown so you get
   ; your prompt back right away when using `lein run`.
   (shutdown-agents))
