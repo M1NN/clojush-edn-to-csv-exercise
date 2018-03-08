@@ -10,6 +10,7 @@
 ; The header line for the Individuals CSV file
 (def individuals-header-line "UUID:ID(Individual),Generation:int,Location:int,:LABEL")
 (def semantics-header-line "UUID:ID(Semantics),TotalError:int,:LABEL")
+(def errors-header-line "UUID:ID(Error),ErrorValue:int,Position:int,:LABEL")
 (def parentOf_edges-header-line ":START_ID(Individual),GeneticOperator,:END_ID(Individual),:TYPE")
 
 (defn uuid [] (str (java.util.UUID/randomUUID)))
@@ -50,15 +51,19 @@
         (apply safe-println csv-file $))) parents))
   1))
 
-  (defn print-semantics-to-csv
+(def a (atom #{}))
+
+(defn print-semantics-to-csv
   [csv-file line]
-  (def a (atom #{}))
+
   (let [semantics-uuid (uuid)
-    values [semantics-uuid (get line :total-error) "Semantics"]]
-    (if-not (contains? @a semantics-uuid)
-      (apply safe-println csv-file values))
-    (swap! a conj semantics-uuid))
-    1)
+        values [semantics-uuid (get line :total-error) "Semantics"]]
+      (if (compare-and-set! a @a (conj @a :errors))
+        (apply safe-println csv-file values))
+      ; (if-not (contains? @a :errors) ; (get line :errors))
+      ;   (apply safe-println csv-file values))
+      ; (swap! a conj :errors))) ; (get line :errors))))
+    1))
 
 ;(defn edn->csv-sequential [edn-file csv-file]
   ;(with-open [out-file (io/writer csv-file)]
@@ -89,7 +94,7 @@
       ;ParentOf_Edge
     ;(safe-println out-file parentOf_edges-header-line)
     ;(->>
-      ;(line-seq (io/reader edn-file))
+      ;(line-seq (io/reader ednvalues [semantics-uuid (get line :total-error) "Semantics"]]-file))
       ;(drop 1)
       ;(pmap (fn [line]
       ;  (print-parent-of-edges-to-csv out-file (edn/read-string {:default individual-reader} line))
@@ -142,6 +147,16 @@
           ;(str "_" strategy)
           ;"_sequential")
         "_Semantics.csv"))
+
+(defn build-errors-csv-filename
+    [edn-filename strategy]
+    (str (fs/parent edn-filename)
+          "/"
+          (fs/base-name edn-filename ".edn")
+                ;(if strategy
+                  ;(str "_" strategy)
+                  ;"_sequential")
+          "_Errors.csv"))
 
 
 (defn -main
