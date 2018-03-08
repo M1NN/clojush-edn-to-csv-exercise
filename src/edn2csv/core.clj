@@ -12,6 +12,7 @@
 (def semantics-header-line "UUID:ID(Semantics),TotalError:int,:LABEL")
 (def parentOf_edges-header-line ":START_ID(Individual),GeneticOperator,:END_ID(Individual),:TYPE")
 
+(defn uuid [] (str (java.util.UUID/randomUUID)))
 ; Ignores (i.e., returns nil) any EDN entries that don't have the
 ; 'clojure/individual tag.
 (defn individual-reader
@@ -25,7 +26,7 @@
 ; problems, so I'm sticking with this approach for now.
 (defn safe-println [output-stream & more]
   (.write output-stream (str (clojure.string/join "," more) "\n")))
-
+(defn uuid [] (str (java.util.UUID/randomUUID)))
 ; This prints out the relevant fields to the CSV filter
 ; and then returns 1 so we can count up how many individuals we processed.
 ; (The counting isn't strictly necessary, but it gives us something to
@@ -45,16 +46,23 @@
     (dorun (map (fn [single-parent]
       (as-> line $
         (assoc $ :single-parent single-parent)
-        (map $ [:parent-uuids :genetic-operators :uuid])
+        (map $ [:single-parent :genetic-operators :uuid])
         (concat $ ["PARENT_OF"])
         (apply safe-println csv-file $))) parents))
   1))
 
+  (defn print-semantics-to-csv
+  [csv-file line]
+  (let [semantics-uuid (uuid)
+    values [semantics-uuid (get line :total-error) "Semantics"]]
+    (apply safe-println csv-file values))
+    1)
+
 ;(defn edn->csv-sequential [edn-file csv-file]
   ;(with-open [out-file (io/writer csv-file)]
-    ;(safe-println out-file individuals-header-line)Individual
+    ;(safe-println out-file individuals-header-line)
     ;(->>
-      ;(line-seq (io/reader edn-file))Individual
+      ;(line-seq (io/reader edn-file))
       ; Skip the first line because it's not an individual
       ;(drop 1)
       ;(map (partial edn/read-string {:default individual-reader}))
