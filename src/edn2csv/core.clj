@@ -7,7 +7,7 @@
            [me.raynes.fs :as fs])
   (:gen-class))
 
-; The header line for the Individuals CSV file
+; The header lines for the CSV files
 (def individuals-header-line "UUID:ID(Individual),Generation:int,Location:int,:LABEL")
 (def semantics-header-line "UUID:ID(Semantics),TotalError:int,:LABEL")
 (def errors-header-line "UUID:ID(Error),ErrorValue:int,Position:int,:LABEL")
@@ -67,121 +67,92 @@
     1))
 
   (def b (atom #{}))
-
+  ;Printing errors to csv does not really work at all at the moment
   (defn print-errors-to-csv
     [csv-file line]
-    (let [errors-uuid (uuid)
-          values [errors-uuid (get (get line :errors) :error-value) (get (get line :errors) :position) "Error"]]
+    (let [errors-uuid (uuid)]
           (dosync
             (if (compare-and-set! b @b @b)
               (if-not (contains? @b (get line :errors))
-              (apply safe-println csv-file values)))
+              (let [errors (get line :errors)]
+                (dorun (map (fn [single-error]
+                  (as-> line $
+                    (assoc $ :single-error single-error)
+                    (map $ [errors-uuid (get single-error :error-value) (get single-error :position)])
+                    (concat $ ["Error"])
+                    (apply safe-println csv-file $))) errors)))))
             (swap! b conj (get line :errors)))
           1))
 
-;(defn edn->csv-sequential [edn-file csv-file]
-  ;(with-open [out-file (io/writer csv-file)]
-    ;(safe-println out-file individuals-header-line)
-    ;(->>
-      ;(line-seq (io/reader edn-file))
-      ; Skip the first line because it's not an individual
-      ;(drop 1)
-      ;(map (partial edn/read-string {:default individual-reader}))
-      ;(map (partial print-individual-to-csv out-file))
-      ;(reduce +)
-      ;)))
 
-;(defn edn->csv-pmap [edn-file csv-file type]
-  ;(with-open [out-file (io/writer csv-file)]
-  ;(if type
-    ;(str "individual" type)
-    ;(safe-println out-file individuals-header-line)
-    ;(->>
-      ;(line-seq (io/reader edn-file))
-      ; Skip the first line because it's not an individual
-      ;(drop 1)
-      ;(pmap (fn [line]
-        ;(print-individual-to-csv out-file (edn/read-string {:default individual-reader} line))
-        ;1))
-    ;  count
-    ;  )))
-      ;ParentOf_Edge
-    ;(safe-println out-file parentOf_edges-header-line)
-    ;(->>
-      ;(line-seq (io/reader ednvalues [semantics-uuid (get line :total-error) "Semantics"]]-file))
-      ;(drop 1)
-      ;(pmap (fn [line]
-      ;  (print-parent-of-edges-to-csv out-file (edn/read-string {:default individual-reader} line))
-      ;  1))
-      ;  count
-      ;  ))))
-
-(defn edn->csv-reducers [edn-file csv-file]
-  (with-open [out-file (io/writer csv-file)]
+  (defn edn->csv-individual [edn-file csv-file]
+    (with-open [out-file (io/writer csv-file)]
     (safe-println out-file errors-header-line)
     (->>
       (iota/seq edn-file)
       (r/map (partial edn/read-string {:default individual-reader}))
-      ; This eliminates empty (nil) lines, which result whenever
-      ; a line isn't a 'clojush/individual. That only happens on
-      ; the first line, which is a 'clojush/run, but we still need
-      ; to catch it. We could do that with `r/drop`, but that
-      ; totally kills the parallelism. :-(
+      (r/filter identity)
+      (r/map (partial print-individual-to-csv out-file))
+      (r/fold +)
+      )))
+
+  (defn edn->csv-parentOf [edn-file csv-file]
+    (with-open [out-file (io/writer csv-file)]
+    (safe-println out-file errors-header-line)
+    (->>
+      (iota/seq edn-file)
+      (r/map (partial edn/read-string {:default individual-reader}))
+      (r/filter identity)
+      (r/map (partial print-parent-of-edges-to-csv out-file))
+      (r/fold +)
+      )))
+
+  (defn edn->csv-semantics [edn-file csv-file]
+    (with-open [out-file (io/writer csv-file)]
+    (safe-println out-file errors-header-line)
+    (->>
+      (iota/seq edn-file)
+      (r/map (partial edn/read-string {:default individual-reader}))
+      (r/filter identity)
+      (r/map (partial print-semantics-to-csv out-file))
+      (r/fold +)
+      )))
+
+  (defn edn->csv-errors [edn-file csv-file]
+    (with-open [out-file (io/writer csv-file)]
+    (safe-println out-file errors-header-line)
+    (->>
+      (iota/seq edn-file)
+      (r/map (partial edn/read-string {:default individual-reader}))
       (r/filter identity)
       (r/map (partial print-errors-to-csv out-file))
       (r/fold +)
       )))
 
-(defn build-individual-csv-filename
-  [edn-filename strategy]
-  (str (fs/parent edn-filename)
-       "/"
-       (fs/base-name edn-filename ".edn")
-       (if strategy
-         (str "_" strategy)
-         "_sequential")
-       "_Individuals.csv"))
 
-(defn build-parentOf-csv-filename
-  [edn-filename strategy]
-  (str (fs/parent edn-filename)
-        "/"
-        (fs/base-name edn-filename ".edn")
-        ;(if strategy
-          ;(str "_" strategy)
-          ;"_sequential")
-        "_ParentOf_edges.csv"))
+(defn build-csv-filename
+      [edn-filename strategy]
+      (str (fs/parent edn-filename)
+            "/"
+            (fs/base-name edn-filename ".edn")
+            (if strategy
+              (str "_" strategy ".csv")
+              "_individual.csv")))
 
-(defn build-semantics-csv-filename
-  [edn-filename strategy]
-  (str (fs/parent edn-filename)
-        "/"
-        (fs/base-name edn-filename ".edn")
-        ;(if strategy
-          ;(str "_" strategy)
-          ;"_sequential")
-        "_Semantics.csv"))
-
-(defn build-errors-csv-filename
-    [edn-filename strategy]
-    (str (fs/parent edn-filename)
-          "/"
-          (fs/base-name edn-filename ".edn")
-                ;(if strategy
-                  ;(str "_" strategy)
-                  ;"_sequential")
-          "_Errors.csv"))
-
-
+; We used the same idea that was used when deciding which
+; function to run but replaced the strategies with the type
+; of file you want outputed, no startegy will output an "individual"
+; csv file.
 (defn -main
   [edn-filename & [strategy]]
-  (let [errors-csv-file (build-errors-csv-filename edn-filename strategy)]
+  (let [csv-file (build-csv-filename edn-filename strategy)]
     (time
       (condp = strategy
-        ;"sequential" (edn->csv-sequential edn-filename individual-csv-file)
-        ;"pmap" (edn->csv-pmap edn-filename individual-csv-file)
-        ;"reducers" (edn->csv-reducers edn-filename individual-csv-file)
-        (edn->csv-reducers edn-filename errors-csv-file))))
+        "individual" (edn->csv-individual edn-filename csv-file)
+        "parentOfEdges" (edn->csv-parentOf edn-filename csv-file)
+        "semantics" (edn->csv-semantics edn-filename csv-file)
+        "errors" (edn->csv-errors edn-filename csv-file)
+        (edn->csv-individual edn-filename csv-file))))
   ; Necessary to get threads spun up by `pmap` to shutdown so you get
   ; your prompt back right away when using `lein run`.
   (shutdown-agents))
