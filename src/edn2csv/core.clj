@@ -55,15 +55,29 @@
 
 (defn print-semantics-to-csv
   [csv-file line]
-
   (let [semantics-uuid (uuid)
         values [semantics-uuid (get line :total-error) "Semantics"]]
-      (if (compare-and-set! a @a (conj @a :errors))
-        (apply safe-println csv-file values))
+      (dosync
+      (if (compare-and-set! a @a @a)
+        (if-not (contains? @a (get line :errors))
+        (apply safe-println csv-file values)))
       ; (if-not (contains? @a :errors) ; (get line :errors))
       ;   (apply safe-println csv-file values))
-      ; (swap! a conj :errors))) ; (get line :errors))))
+      (swap! a conj (get line :errors)))
     1))
+
+  (def b (atom #{}))
+
+  (defn print-errors-to-csv
+    [csv-file line]
+    (let [errors-uuid (uuid)
+          values [errors-uuid (get (get line :errors) :error-value) (get (get line :errors) :position) "Error"]]
+          (dosync
+            (if (compare-and-set! b @b @b)
+              (if-not (contains? @b (get line :errors))
+              (apply safe-println csv-file values)))
+            (swap! b conj (get line :errors)))
+          1))
 
 ;(defn edn->csv-sequential [edn-file csv-file]
   ;(with-open [out-file (io/writer csv-file)]
@@ -104,7 +118,7 @@
 
 (defn edn->csv-reducers [edn-file csv-file]
   (with-open [out-file (io/writer csv-file)]
-    (safe-println out-file semantics-header-line)
+    (safe-println out-file errors-header-line)
     (->>
       (iota/seq edn-file)
       (r/map (partial edn/read-string {:default individual-reader}))
@@ -114,7 +128,7 @@
       ; to catch it. We could do that with `r/drop`, but that
       ; totally kills the parallelism. :-(
       (r/filter identity)
-      (r/map (partial print-semantics-to-csv out-file))
+      (r/map (partial print-errors-to-csv out-file))
       (r/fold +)
       )))
 
@@ -161,13 +175,13 @@
 
 (defn -main
   [edn-filename & [strategy]]
-  (let [semantics-csv-file (build-semantics-csv-filename edn-filename strategy)]
+  (let [errors-csv-file (build-errors-csv-filename edn-filename strategy)]
     (time
       (condp = strategy
         ;"sequential" (edn->csv-sequential edn-filename individual-csv-file)
         ;"pmap" (edn->csv-pmap edn-filename individual-csv-file)
         ;"reducers" (edn->csv-reducers edn-filename individual-csv-file)
-        (edn->csv-reducers edn-filename semantics-csv-file))))
+        (edn->csv-reducers edn-filename errors-csv-file))))
   ; Necessary to get threads spun up by `pmap` to shutdown so you get
   ; your prompt back right away when using `lein run`.
   (shutdown-agents))
