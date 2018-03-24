@@ -12,6 +12,13 @@
 (def semantics-header-line "UUID:ID(Semantics),TotalError:int,:LABEL")
 (def errors-header-line "UUID:ID(Error),ErrorValue:int,Position:int,:LABEL")
 (def parentOf_edges-header-line ":START_ID(Individual),GeneticOperator,:END_ID(Individual),:TYPE")
+(def individual-semantics-edges-header-line ":START_ID(Individual),:END_ID(Semantics),:TYPE")
+(def semantics-errors-header-line ":START_ID(Semantics),:END_ID(Error),:TYPE")
+
+(def semantics-atom (atom #{}))
+(def errors-atom (atom #{}))
+(def individual-semantics-atom (atom #{}))
+(def semantics-errors-atom (atom #{}))
 
 (defn uuid [] (str (java.util.UUID/randomUUID)))
 ; Ignores (i.e., returns nil) any EDN entries that don't have the
@@ -51,38 +58,59 @@
         (apply safe-println csv-file $))) parents))
   1))
 
-(def a (atom #{}))
+
 
 (defn print-semantics-to-csv
   [csv-file line]
   (let [semantics-uuid (uuid)
         values [semantics-uuid (get line :total-error) "Semantics"]]
       (dosync
-      (if (compare-and-set! a @a @a)
-        (if-not (contains? @a (get line :errors))
+      (if (compare-and-set! semantics-atom @semantics-atom @semantics-atom)
+        (if-not (contains? @semantics-atom (get line :errors))
         (apply safe-println csv-file values)))
       ; (if-not (contains? @a :errors) ; (get line :errors))
       ;   (apply safe-println csv-file values))
-      (swap! a conj (get line :errors)))
+      (swap! semantics-atom conj (get line :errors)))
     1))
 
-  (def b (atom #{}))
-  ;Printing errors to csv does not really work at all at the moment
-  (defn print-errors-to-csv
+
+(defn print-errors-to-csv
     [csv-file line]
-    (let [errors-uuid (uuid)]
-          (dosync
-            (if (compare-and-set! b @b @b)
-              (if-not (contains? @b (get line :errors))
-              (let [errors (get line :errors)]
-                (dorun (map (fn [single-error]
-                  (as-> line $
-                    (assoc $ :single-error single-error)
-                    (map $ [errors-uuid (get single-error :error-value) (get single-error :position)])
-                    (concat $ ["Error"])
-                    (apply safe-println csv-file $))) errors)))))
-            (swap! b conj (get line :errors)))
+    (dosync
+      (if (compare-and-set! errors-atom @errors-atom @errors-atom)
+        (if-not (contains? @errors-atom (get line :errors))
+          (doseq [x (get line :errors)]
+          (let [error-uuid (uuid)
+                values [error-uuid x (.indexOf (get line :errors) x) "Error"]]
+                    (apply safe-println csv-file values)))))
+            (swap! errors-atom conj (get line :errors)))
+          1)
+
+
+
+  (defn print-individual-semantic-edges-to-csv
+    [csv-file line]
+    (let [semantics-uuid (uuid)
+          values [(get line :uuid) semantics-uuid "HAS_SEMANTICS"]]
+        (dosync
+          (if (compare-and-set! individual-semantics-atom @individual-semantics-atom @individual-semantics-atom)
+            (if-not (contains? @individual-semantics-atom (get line :errors))
+            (apply safe-println csv-file values)))
+          (swap! individual-semantics-atom conj (get line :errors)))
           1))
+
+  (defn print-semantics-errors-to-csv
+    [csv-file line]
+    (dosync
+      (if (compare-and-set! semantics-errors-atom @semantics-errors-atom @semantics-errors-atom)
+        (if-not (contains? @semantics-errors-atom (get line :errors))
+          (doseq [x (get line :errors)]
+          (let [error-uuid (uuid)
+                semantics-uuid (uuid)
+                values [semantics-uuid error-uuid "HAS_ERROR"]]
+                    (apply safe-println csv-file values)))))
+            (swap! semantics-errors-atom conj (get line :errors)))
+          1)
 
 
   (defn edn->csv-individual [edn-file csv-file]
@@ -129,6 +157,28 @@
       (r/fold +)
       )))
 
+  (defn edn->csv-individual-semantics-edges [edn-file csv-file]
+    (with-open [out-file (io/writer csv-file)]
+    (safe-println out-file individual-semantics-edges-header-line)
+    (->>
+      (iota/seq edn-file)
+      (r/map (partial edn/read-string {:default individual-reader}))
+      (r/filter identity)
+      (r/map (partial print-individual-semantic-edges-to-csv out-file))
+      (r/fold +)
+      )))
+
+  (defn edn->csv-semantics-errors [edn-file csv-file]
+    (with-open [out-file (io/writer csv-file)]
+    (safe-println out-file semantics-errors-header-line)
+    (->>
+      (iota/seq edn-file)
+      (r/map (partial edn/read-string {:default individual-reader}))
+      (r/filter identity)
+      (r/map (partial print-semantics-errors-to-csv out-file))
+      (r/fold +)
+      )))
+
 
 (defn build-csv-filename
       [edn-filename strategy]
@@ -152,6 +202,8 @@
         "parentOfEdges" (edn->csv-parentOf edn-filename csv-file)
         "semantics" (edn->csv-semantics edn-filename csv-file)
         "errors" (edn->csv-errors edn-filename csv-file)
+        "individual-semantics" (edn->csv-individual-semantics-edges edn-filename csv-file)
+        "semantics-errors" (edn->csv-semantics-errors edn-filename csv-file)
         (edn->csv-individual edn-filename csv-file))))
   ; Necessary to get threads spun up by `pmap` to shutdown so you get
   ; your prompt back right away when using `lein run`.
